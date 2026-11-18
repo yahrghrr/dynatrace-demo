@@ -3,6 +3,9 @@
 # setup.sh — Install Java 17 + Maven, build the app, install it
 # as a systemd service that starts automatically on VM boot.
 #
+# Also installs a load generator service (normal + error traffic) and the
+# "dtdemo-load" command to spike errors. Skip it with: sudo LOADGEN=0 bash setup.sh
+#
 # Run from the project directory as:   sudo bash setup.sh
 # Safe to re-run: it rebuilds and redeploys.
 # Supports Ubuntu/Debian (apt) and RHEL/CentOS/Rocky/Alma/Amazon Linux (dnf/yum).
@@ -16,6 +19,10 @@ LOG_DIR="/var/log/${APP_NAME}"
 SERVICE_FILE="/etc/systemd/system/${APP_NAME}.service"
 ENV_FILE="/etc/default/${APP_NAME}"
 PORT="${PORT:-8080}"
+LOADGEN="${LOADGEN:-1}"
+LOADGEN_SERVICE="${APP_NAME}-loadgen"
+LOADGEN_ENV="/etc/default/${LOADGEN_SERVICE}"
+LOADGEN_STATE="/var/lib/${LOADGEN_SERVICE}"
 
 if [[ $EUID -ne 0 ]]; then
   echo "Please run as root: sudo bash $0" >&2
@@ -55,10 +62,13 @@ if ! id "${APP_USER}" >/dev/null 2>&1; then
   useradd --system --no-create-home --shell /usr/sbin/nologin "${APP_USER}" 2>/dev/null \
     || useradd --system --no-create-home --shell /sbin/nologin "${APP_USER}"
 fi
-mkdir -p "${INSTALL_DIR}" "${LOG_DIR}"
+mkdir -p "${INSTALL_DIR}/bin" "${LOG_DIR}" "${LOADGEN_STATE}"
 install -m 0644 "${JAR}" "${INSTALL_DIR}/${APP_NAME}.jar"
-install -m 0644 README.md "${INSTALL_DIR}/README.md" 2>/dev/null || true
-chown -R "${APP_USER}:${APP_USER}" "${INSTALL_DIR}" "${LOG_DIR}"
+install -m 0644 README.md DYNATRACE.md "${INSTALL_DIR}/" 2>/dev/null || true
+install -m 0755 scripts/loadgen.sh scripts/dtdemo-load scripts/trigger.sh "${INSTALL_DIR}/bin/"
+ln -sf "${INSTALL_DIR}/bin/dtdemo-load" /usr/local/bin/dtdemo-load
+chown -R "${APP_USER}:${APP_USER}" "${INSTALL_DIR}" "${LOG_DIR}" "${LOADGEN_STATE}"
+chown -R root:root "${INSTALL_DIR}/bin"
 chmod 0755 "${LOG_DIR}"
 
 echo "=============================="
@@ -87,6 +97,21 @@ for i in $(seq 1 60); do
   fi
 done
 
+echo "=============================="
+echo "6. Load generator"
+echo "=============================="
+install -m 0644 deploy/${LOADGEN_SERVICE}.service "/etc/systemd/system/${LOADGEN_SERVICE}.service"
+[[ -f "${LOADGEN_ENV}" ]] || install -m 0644 deploy/${LOADGEN_SERVICE}.env "${LOADGEN_ENV}"
+[[ "${PORT}" != 8080 ]] && sed -i -E "s|^BASE_URL=.*|BASE_URL=http://localhost:${PORT}|" "${LOADGEN_ENV}"
+systemctl daemon-reload
+if [[ "${LOADGEN}" == 1 ]]; then
+  systemctl enable "${LOADGEN_SERVICE}"
+  systemctl restart "${LOADGEN_SERVICE}"
+  echo "Load generator running (starts at boot). Settings: ${LOADGEN_ENV}"
+else
+  echo "Load generator installed but NOT enabled (LOADGEN=0). Start with: dtdemo-load start && dtdemo-load enable"
+fi
+
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo "=============================="
 echo "Done! ${APP_NAME} is running and enabled at boot."
@@ -99,9 +124,14 @@ echo "  curl http://localhost:${PORT}/normal"
 echo "  curl http://localhost:${PORT}/error"
 [[ -n "${IP}" ]] && echo "  (from another machine: http://${IP}:${PORT}/normal — open port ${PORT} in the firewall)"
 echo ""
-echo "Generate traffic:  bash scripts/trigger.sh"
+echo "Load generator:"
+echo "  dtdemo-load status            # current load and last-minute results"
+echo "  dtdemo-load spike             # 10 min error spike (50% errors, 180 req/min)"
+echo "  dtdemo-load spike 15 80 300   # 15 min, 80% errors, 300 req/min"
+echo "  dtdemo-load calm              # end the spike"
 echo ""
 echo "Logs:"
 echo "  tail -f ${LOG_DIR}/application.log"
 echo "  journalctl -u ${APP_NAME} -f"
+echo "  journalctl -u ${LOADGEN_SERVICE} -f      (or: dtdemo-load logs)"
 echo "=============================="

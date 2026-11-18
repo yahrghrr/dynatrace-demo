@@ -1,0 +1,107 @@
+#!/bin/bash
+# =============================================================
+# dtdemo-load — control the dynatrace-demo load generator.
+#
+#   dtdemo-load status                         show mode, rates, last-minute results
+#   dtdemo-load watch                          live status (refresh every 2s)
+#   dtdemo-load spike [MIN] [ERR%] [REQ/MIN]   error spike, default 10 min, 50%, 180 req/min
+#   dtdemo-load calm                           end a spike now (back to baseline)
+#   dtdemo-load baseline REQ/MIN ERR%          change steady-state load, e.g. baseline 60 2
+#   dtdemo-load start|stop|restart             start/stop the generator
+#   dtdemo-load enable|disable                 start (or not) at boot
+#   dtdemo-load logs                           follow the generator's log
+# =============================================================
+set -euo pipefail
+
+SERVICE="dynatrace-demo-loadgen"
+CONF="${LOADGEN_CONF:-/etc/default/dynatrace-demo-loadgen}"
+STATE_DIR="${LOADGEN_STATE_DIR:-/var/lib/dynatrace-demo-loadgen}"
+SPIKE_FILE="${STATE_DIR}/spike"
+STATUS_FILE="${STATE_DIR}/status"
+
+usage() { sed -n '3,14p' "$0" | sed 's/^# \{0,1\}//'; }
+die()   { echo "Error: $*" >&2; exit 1; }
+is_int() { [[ "${1:-}" =~ ^[0-9]+$ ]]; }
+
+cmd="${1:-status}"
+
+# Commands that change state need root; re-run through sudo.
+case "${cmd}" in
+  spike|calm|baseline|start|stop|restart|enable|disable)
+    if [[ ${EUID} -ne 0 && -z "${LOADGEN_NO_SUDO:-}" ]]; then exec sudo -- "$0" "$@"; fi ;;
+esac
+
+have_systemd() { [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1; }
+
+warn_if_stopped() {
+  if have_systemd && ! systemctl is-active --quiet "${SERVICE}"; then
+    echo "Note: ${SERVICE} is not running. Start it with: dtdemo-load start" >&2
+  fi
+}
+
+set_conf() { # set_conf KEY VALUE
+  if grep -qE "^#?\s*$1=" "${CONF}" 2>/dev/null; then
+    sed -i -E "s|^#?\s*$1=.*|$1=$2|" "${CONF}"
+  else
+    echo "$1=$2" >> "${CONF}"
+  fi
+}
+
+show_status() {
+  if have_systemd; then
+    printf 'service            : %s (%s at boot)\n' \
+      "$(systemctl is-active "${SERVICE}" 2>/dev/null || true)" \
+      "$(systemctl is-enabled "${SERVICE}" 2>/dev/null || true)"
+  fi
+  if [[ ! -r "${STATUS_FILE}" ]]; then
+    echo "No status yet (${STATUS_FILE} missing). Is the generator running?"; return
+  fi
+  # shellcheck disable=SC1090
+  . "${STATUS_FILE}"
+  local age=$(( $(date +%s) - updated ))
+  (( age > 10 )) && echo "WARNING: status is ${age}s old — generator may be stopped"
+  if [[ "${mode}" == "spike" ]]; then
+    printf 'mode               : SPIKE (%dm%02ds left)\n' $(( spike_seconds_left / 60 )) $(( spike_seconds_left % 60 ))
+  else
+    printf 'mode               : baseline\n'
+  fi
+  printf 'target             : %s\n' "${target_url}"
+  printf 'load               : %s req/min, %s%% errors\n' "${requests_per_min}" "${error_pct}"
+  printf 'last full minute   : %s ok, %s errors, %s unreachable\n' "${last_min_ok}" "${last_min_errors}" "${last_min_unreachable}"
+  printf 'current minute     : %s ok, %s errors, %s unreachable\n' "${current_min_ok}" "${current_min_errors}" "${current_min_unreachable}"
+}
+
+case "${cmd}" in
+  status) show_status ;;
+  watch)
+    while true; do clear; date; echo; show_status; echo; echo "(Ctrl+C to exit)"; sleep 2; done ;;
+  spike)
+    minutes="${2:-10}"; pct="${3:-50}"; rpm="${4:-180}"
+    is_int "${minutes}" && (( minutes > 0 )) || die "MINUTES must be a positive integer"
+    is_int "${pct}" && (( pct <= 100 ))      || die "ERROR_PCT must be 0-100"
+    is_int "${rpm}"                          || die "REQ/MIN must be an integer"
+    mkdir -p "${STATE_DIR}"
+    end=$(( $(date +%s) + minutes * 60 ))
+    echo "${end} ${pct} ${rpm}" > "${SPIKE_FILE}.tmp" && mv -f "${SPIKE_FILE}.tmp" "${SPIKE_FILE}"
+    chmod 0644 "${SPIKE_FILE}"
+    echo "Spike ON for ${minutes} min: ${rpm} req/min, ${pct}% errors (until $(date -d "@${end}" '+%H:%M:%S'))."
+    echo "End early with: dtdemo-load calm"
+    warn_if_stopped ;;
+  calm)
+    rm -f "${SPIKE_FILE}"
+    echo "Spike cleared — back to baseline." ;;
+  baseline)
+    rpm="${2:-}"; pct="${3:-}"
+    is_int "${rpm}" && is_int "${pct}" && (( pct <= 100 )) || die "usage: dtdemo-load baseline REQ/MIN ERR%   (e.g. baseline 60 2)"
+    [[ -f "${CONF}" ]] || die "${CONF} not found"
+    set_conf REQUESTS_PER_MIN "${rpm}"
+    set_conf ERROR_PCT "${pct}"
+    echo "Baseline set to ${rpm} req/min, ${pct}% errors (applies within 1s)." ;;
+  start|stop|restart|enable|disable)
+    have_systemd || die "systemd not available"
+    systemctl "${cmd}" "${SERVICE}"
+    systemctl --no-pager --lines=0 status "${SERVICE}" | head -3 || true ;;
+  logs) exec journalctl -u "${SERVICE}" -f ;;
+  -h|--help|help) usage ;;
+  *) usage; exit 1 ;;
+esac

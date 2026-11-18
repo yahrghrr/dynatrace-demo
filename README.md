@@ -9,17 +9,28 @@ A small Spring Boot 3 (Java 17) web app for demonstrating **Dynatrace** monitori
 
 Dynatrace OneAgent picks up the failed `/error` requests as service failures, records the exception in the PurePath, and Log Monitoring sees the `ERROR` lines in `/var/log/dynatrace-demo/application.log`.
 
+A built-in **load generator** runs as its own service and keeps steady traffic flowing: 60 requests/min with about 2% errors by default. Use the `dtdemo-load` command to **spike the error rate** on demand:
+
+```bash
+dtdemo-load spike          # 10-minute error spike: 50% errors at 180 req/min
+dtdemo-load calm           # back to normal
+```
+
 ```
 .
 ├── pom.xml
 ├── setup.sh                         # one-shot install on a VM (build + systemd service)
-├── uninstall.sh                     # removes the service
+├── uninstall.sh                     # removes the services
 ├── DYNATRACE.md                     # how to get Davis to open Problem cards from /error
 ├── deploy/
-│   ├── dynatrace-demo.service       # systemd unit (auto-start on boot)
-│   └── dynatrace-demo.env           # -> /etc/default/dynatrace-demo (JAVA_OPTS, SERVER_PORT)
+│   ├── dynatrace-demo.service       # systemd unit for the app (auto-start on boot)
+│   ├── dynatrace-demo.env           # -> /etc/default/dynatrace-demo (JAVA_OPTS, SERVER_PORT)
+│   ├── dynatrace-demo-loadgen.service  # systemd unit for the load generator (auto-start on boot)
+│   └── dynatrace-demo-loadgen.env      # -> /etc/default/dynatrace-demo-loadgen (baseline load)
 ├── scripts/
-│   └── trigger.sh                   # calls /normal and /error to generate traffic
+│   ├── loadgen.sh                   # load generator loop (run by the loadgen service)
+│   ├── dtdemo-load                  # CLI: status / spike / calm / baseline ... (installed to /usr/local/bin)
+│   └── trigger.sh                   # ad-hoc calls to /normal and /error
 └── src/main/
     ├── java/com/demo/DynatraceDemoApplication.java
     └── resources/
@@ -68,7 +79,10 @@ The script does the following:
 3. Creates a system user `dynatrace-demo` and copies the jar to `/opt/dynatrace-demo/dynatrace-demo.jar`.
 4. Creates `/var/log/dynatrace-demo/` for the application log.
 5. Installs `/etc/systemd/system/dynatrace-demo.service`, **enables it at boot** and starts it.
-6. Waits until `/normal` responds, then prints the test URLs.
+6. Waits until `/normal` responds.
+7. Installs and starts the **load generator** service `dynatrace-demo-loadgen` (also enabled at boot) and the `dtdemo-load` command.
+
+To install without starting the load generator, run `sudo LOADGEN=0 bash setup.sh`. You can start it later with `dtdemo-load start && dtdemo-load enable`.
 
 The script is safe to re-run. To redeploy after a code change, `git pull` and run `sudo bash setup.sh` again.
 
@@ -146,6 +160,42 @@ BASE_URL=http://<vm-ip>:8080 bash scripts/trigger.sh mix 50
 DELAY=0.5 bash scripts/trigger.sh loop
 ```
 
+### With the load generator (continuous traffic + error spikes)
+
+After `setup.sh`, the `dynatrace-demo-loadgen` service is always running and starts at boot. Every second it sends requests to the app, so Dynatrace always has a steady stream of `/normal` plus a little `/error` background noise. This steady traffic gives Davis a baseline to learn from.
+
+Control it with `dtdemo-load`. Commands that change state use `sudo` automatically.
+
+| Command | What it does |
+|---|---|
+| `dtdemo-load status` | Shows the mode (baseline or spike), the current load, and how many requests succeeded, failed or couldn't reach the app in the last minute |
+| `dtdemo-load watch` | Live status that refreshes every 2 s |
+| `dtdemo-load spike` | **Error spike** for 10 min: 50% errors at 180 req/min |
+| `dtdemo-load spike 15 80 300` | Spike for 15 min with 80% errors at 300 req/min (`spike [MINUTES] [ERROR%] [REQ/MIN]`) |
+| `dtdemo-load spike 5 100 120` | 5 minutes of *nothing but* errors |
+| `dtdemo-load calm` | Ends the spike now and goes back to baseline |
+| `dtdemo-load baseline 120 5` | Changes the steady-state load to 120 req/min with 5% errors (applies within 1 s, no restart needed) |
+| `dtdemo-load stop` / `start` / `restart` | Stops or starts the generator |
+| `dtdemo-load disable` / `enable` | Turns auto-start at boot off or on |
+| `dtdemo-load logs` | Follows the generator's log. It logs a line when the mode changes, and once a minute with the counts |
+
+Notes:
+- A spike ends on its own when its time is up. Spikes don't survive a reboot; after a reboot the generator comes back in baseline mode. The baseline settings live in `/etc/default/dynatrace-demo-loadgen`, so changes you make there do survive.
+- Example output:
+
+  ```
+  $ dtdemo-load status
+  service            : active (enabled at boot)
+  mode               : SPIKE (8m12s left)
+  target             : http://localhost:8080
+  load               : 180 req/min, 50% errors
+  last full minute   : 91 ok, 89 errors, 0 unreachable
+  current minute     : 24 ok, 22 errors, 0 unreachable
+  ```
+
+- If the app is down, requests are counted as `unreachable` and the generator keeps trying.
+- Keep the baseline at **10 req/min or more**. Below about that, Davis's over-alerting protection may skip evaluating the service.
+
 ### What you should see in Dynatrace
 - **Services →** `dynatrace-demo` (or `DynatraceDemoApplication`): requests to `/normal` and `/error`, and the failure rate going up as `/error` is hit.
 - **Distributed traces / PurePaths** for `/error`: an `ArithmeticException: / by zero` thrown in `DynatraceDemoApplication.errorTransaction`.
@@ -156,7 +206,7 @@ DELAY=0.5 bash scripts/trigger.sh loop
 
 ## 3. Auto-start on VM boot
 
-`setup.sh` runs `systemctl enable dynatrace-demo`, which hooks the service into `multi-user.target`, so the app starts automatically every time the VM boots. The unit also:
+`setup.sh` runs `systemctl enable` for both `dynatrace-demo` (the app) and `dynatrace-demo-loadgen` (the load generator); the load generator starts after the app. `systemctl enable dynatrace-demo` hooks the service into `multi-user.target`, so the app starts automatically every time the VM boots. The unit also:
 - waits for `network-online.target`
 - restarts the app 10 s after it exits (`Restart=always`)
 - runs as the unprivileged `dynatrace-demo` user rather than root
@@ -167,7 +217,7 @@ To verify that it's enabled:
 systemctl is-enabled dynatrace-demo
 ```
 
-That prints `enabled`. Then reboot the VM:
+That prints `enabled`. Check the load generator the same way with `systemctl is-enabled dynatrace-demo-loadgen`. Then reboot the VM:
 
 ```bash
 sudo reboot
@@ -183,6 +233,10 @@ systemctl status dynatrace-demo
 curl http://localhost:8080/normal
 ```
 
+```bash
+dtdemo-load status
+```
+
 ### Managing the service
 
 | Action | Command |
@@ -193,6 +247,8 @@ curl http://localhost:8080/normal
 | App log file | `tail -f /var/log/dynatrace-demo/application.log` |
 | systemd journal | `journalctl -u dynatrace-demo -f` |
 | Change JVM opts / port | edit `/etc/default/dynatrace-demo`, then `sudo systemctl restart dynatrace-demo` |
+| Load generator | `dtdemo-load status\|spike\|calm\|stop\|start` (see section 2) |
+| Load generator journal | `dtdemo-load logs` or `journalctl -u dynatrace-demo-loadgen -f` |
 | Remove everything | `sudo bash uninstall.sh` |
 
 The app log rotates daily and keeps 7 days.

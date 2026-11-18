@@ -15,7 +15,9 @@ So if you run `curl /error` a handful of times on an idle demo VM, you'll see:
 | What you do | What Dynatrace shows |
 |---|---|
 | A few `curl /error` calls | ✅ Failed requests in **Services → dynatrace-demo → Failures**<br>✅ PurePath/trace with `ArithmeticException: / by zero`<br>✅ ERROR lines in **Logs**<br>❌ **No Problem**: too little traffic and too short |
-| A sustained failure storm on a service with a learned baseline | ✅ Everything above, plus a **"Failure rate increase"** Problem opened automatically by Davis |
+| A sustained failure storm (`dtdemo-load spike`) on a service with a learned baseline | ✅ Everything above, plus a **"Failure rate increase"** Problem opened automatically by Davis |
+
+> **The load generator does most of the work.** `setup.sh` installs a load generator service that runs all the time and starts at boot. It sends 60 req/min with about 2% errors, which gives Davis the steady traffic and baseline it needs. `dtdemo-load spike` then raises the error rate (50% errors at 180 req/min for 10 minutes by default) to cause the incident. See the README, section 2, for all the commands.
 
 The `/error` HTTP 500s already count as failures. Dynatrace treats server-side HTTP 5xx responses and unhandled exceptions as failed requests by default, so you don't need any code changes.
 
@@ -25,7 +27,7 @@ There are three ways to get a Problem card. Pick based on how predictable the de
 |---|---|---|---|---|
 | **A. Automatic baseline**, no config | Fully automatic | None, but needs a learned baseline and real traffic | Minutes, once the baseline exists | Showing "Davis works out of the box" |
 | **B. Fixed failure-rate threshold** on the service | Yes, service anomaly detection | ~2 min in the UI | ~1–5 min | **Recommended for live demos** |
-| **C. Metric event** or **log event** | Yes, a custom Davis event | ~5 min in the UI | ~1–3 min, even for a single error | "Every `/error` must alert" |
+| **C. Metric event** or **log event** | Yes, a custom Davis event | ~5 min in the UI | ~1–3 min | A threshold you control, or alerting on every single error |
 
 ---
 
@@ -37,7 +39,7 @@ There are three ways to get a Problem card. Pick based on how predictable the de
    sudo systemctl restart dynatrace-demo
    ```
 
-2. Generate a little traffic, for example `bash scripts/trigger.sh both 5`. Within a couple of minutes the service shows up under **Services**. It is usually named after the Spring app or controller, such as `dynatrace-demo` or `DynatraceDemoApplication`.
+2. Check that the load generator is sending traffic with `dtdemo-load status`. Within a couple of minutes the service shows up under **Services**. It is usually named after the Spring app or controller, such as `dynatrace-demo` or `DynatraceDemoApplication`.
 3. Open the service and confirm that `/error` requests appear under **Failures** with the `ArithmeticException`. If they don't, fix that first; none of the options below work without it.
 4. Make sure you can receive the alert. Problems always show up under **Problems** in the UI. Email or Slack notifications also need an **alerting profile** and a **problem notification**: classic path **Settings → Alerting → Problem alerting profiles** and **Settings → Integration → Problem notifications**.
 
@@ -47,24 +49,23 @@ There are three ways to get a Problem card. Pick based on how predictable the de
 
 This is the "out of the box" story. It only works when the service has a baseline and enough traffic.
 
-1. **Build a baseline with healthy traffic.** Davis needs to learn what "normal" looks like for a new service. Give it as much clean traffic as you can before the demo; a few hours is good and longer is better. Run it in the background on the VM or another machine:
+1. **Let the baseline build.** Davis needs to learn what "normal" looks like for a new service. The load generator handles this automatically, so set up the VM well before the demo: a few hours is good and a day or more is better. Check that it's running with:
 
    ```bash
-   nohup bash scripts/trigger.sh baseline 240 > /tmp/baseline.log 2>&1 &
+   dtdemo-load status
    ```
 
-   That's about 60 req/min with 0% errors, for 4 hours.
-2. **Start the failure storm** at demo time:
+2. **Start the spike** at demo time:
 
    ```bash
-   bash scripts/trigger.sh storm 15
+   dtdemo-load spike 15
    ```
 
-   That's about 120 req/min with about 50% errors, for 15 minutes. It clears the over-alerting minimum by a wide margin, and a jump from 0% to about 50% failures is well past the default relative threshold.
+   That's 180 req/min with 50% errors for 15 minutes. It clears the over-alerting minimum by a wide margin, and a jump from about 2% to about 50% failures is well past the default relative threshold.
 3. Watch **Problems**. A **"Failure rate increase"** problem on the `dynatrace-demo` service should open within a few minutes. Click it to show the root-cause analysis down to the PurePath and the `ArithmeticException`.
-4. Stop the storm (Ctrl+C or let it finish). Davis closes the Problem automatically once the failure rate is back to normal.
+4. End the spike with `dtdemo-load calm`, or let it time out. Davis closes the Problem automatically once the failure rate is back to normal.
 
-If nothing appears after about 10 minutes of storm, the baseline probably isn't ready yet (the service is too new) or the traffic is too low. Use Option B.
+If nothing appears after about 10 minutes of spike, the baseline probably isn't ready yet (the service is too new). Use Option B.
 
 ---
 
@@ -79,14 +80,14 @@ This tells Davis to use a fixed threshold for this service instead of waiting fo
    - If you can't find a failure-rate setting at all, skip to **Option C1**. A custom alert does the same job and works on every UI.
 2. Under **Failure rate**:
    - Turn on detection and switch the mode from **Automatic** to **Using fixed thresholds**.
-   - **Threshold:** `5` %. Alert when more than 5% of requests fail.
+   - **Threshold:** `10` %. Alert when more than 10% of requests fail. That's well above the generator's ~2% background errors and well below a spike's 50%.
    - **Sensitivity:** `High`.
    - **Over-alerting protection:** lower the minimum requests per minute to `1` and the abnormal-state duration to `1` minute. This step matters on a low-traffic demo VM.
 3. Save.
 4. Trigger it:
 
    ```bash
-   bash scripts/trigger.sh storm 5
+   dtdemo-load spike 5
    ```
 
 5. Within about 1–5 minutes, **Problems** shows a **failure rate** problem on `dynatrace-demo`, with the `ArithmeticException` as the root cause.
@@ -97,14 +98,18 @@ Change the settings back to **Automatic** after the demo if this is a shared ten
 
 ## Option C: Alert on every error (custom Davis events)
 
-Use this when even a single `/error` call should open a Problem. You can use either C1 or C2, or both.
+Use this when you want a custom alert with a threshold you control. You can use either C1 or C2, or both.
+
+> **The background errors matter here.** With the load generator's default ~2% errors (about 1 error per minute), a threshold of "more than 0 errors" would keep a Problem open permanently. You have two choices:
+> - **Alert on a spike (recommended):** use a threshold of **more than 10 failures per minute**, as below. The baseline gives about 1 per minute and `dtdemo-load spike` gives about 90 per minute.
+> - **Alert on every single error:** first turn off the background errors with `dtdemo-load baseline 60 0`, then use a threshold of `0`, and trigger with `bash scripts/trigger.sh error 1`.
 
 ### C1. Metric event on server-side errors
 
 **On the newer platform: Anomaly Detection app (custom alert)**
 
 1. Open **Apps → Anomaly Detection → + Custom alert** (some versions call it an *anomaly detector*).
-2. Test this query in a **Notebook** first. It should return a non-zero series right after you run `bash scripts/trigger.sh error 3`:
+2. Test this query in a **Notebook** first. With the load generator running it should already return a small non-zero series, and a large one during `dtdemo-load spike`:
 
    ```
    timeseries failures = sum(dt.service.request.failure_count), by:{dt.entity.service}
@@ -115,11 +120,11 @@ Use this when even a single `/error` call should open a Problem. You can use eit
    If it returns nothing, make sure the name matches what **Services** shows. On some tenants the metric name is different: type `dt.service.request` in the query editor and pick the failure-count metric it suggests.
 3. In the custom alert, paste the query and configure:
    - **Analyzer:** **Static threshold**
-   - **Threshold:** `0`, alert when **above**
+   - **Threshold:** `10`, alert when **above**. That's 10 failures per minute; use `0` only if you turned off the background errors.
    - **Violating samples:** `1`, **Sliding window:** `3`, **Dealerting samples:** `3`
    - **Event title:** `Divide-by-zero errors on dynatrace-demo`
    - **Event type/category:** **Error**
-4. Save, then run `bash scripts/trigger.sh error 3`. A Problem appears within a few minutes.
+4. Save, then run `dtdemo-load spike 5`. A Problem appears within a few minutes.
 
 **On the classic UI: metric event**
 
@@ -130,7 +135,7 @@ Use this when even a single `/error` call should open a Problem. You can use eit
    - **Aggregation:** `Count` or `Sum`
    - **Entity filter:** service name equals `dynatrace-demo` (use the name shown in Services)
    - **Model type:** **Static threshold**
-   - **Threshold:** `0`, with the alert condition **Above**
+   - **Threshold:** `10`, with the alert condition **Above**. Use `0` only if you turned off the background errors.
    - **Violating samples:** `1`, **Sliding window:** `3`, **Dealerting samples:** `3`
 3. **Event template:**
    - **Title:** `Divide-by-zero errors on dynatrace-demo`
@@ -138,7 +143,7 @@ Use this when even a single `/error` call should open a Problem. You can use eit
 4. Save, then run:
 
    ```bash
-   bash scripts/trigger.sh error 3
+   dtdemo-load spike 5
    ```
 
    A Problem appears within about 1–3 minutes.
@@ -155,15 +160,15 @@ Instead of the request failure, this alerts on the log line the app writes to `/
    - **Matcher:** `matchesPhrase(content, "Divide by zero exception caught")`
    - **Title:** `Divide-by-zero exception in dynatrace-demo`
    - **Event type:** **Error**
-4. Run `bash scripts/trigger.sh error 1`. A Problem appears once the log line is ingested and processed, usually within 1–3 minutes.
+4. A log event fires on **every** matching line, so turn off the generator's background errors first with `dtdemo-load baseline 60 0`. Then run `bash scripts/trigger.sh error 1`. A Problem appears once the log line is ingested and processed, usually within 1–3 minutes.
 
 ---
 
 ## Suggested demo flow
 
-1. **Healthy state:** `bash scripts/trigger.sh loop` with 20% errors, or `baseline`. Show the service, its requests, and a couple of failed traces. Point out that there is **no Problem**: Davis doesn't alert on background noise.
-2. **Incident:** `bash scripts/trigger.sh storm 10`. Show the **Problem card** opening with its impact (the affected service and endpoint), the root cause (`ArithmeticException` in `DynatraceDemoApplication.errorTransaction`), and the linked logs.
-3. **Recovery:** stop the storm and show the Problem closing on its own.
+1. **Healthy state:** the load generator is already running (check with `dtdemo-load status`). Show the service, its steady traffic, and a couple of failed traces from the ~2% background errors. Point out that there is **no Problem**: Davis doesn't alert on background noise.
+2. **Incident:** run `dtdemo-load spike 10` and keep `dtdemo-load watch` open in a second terminal. Show the failure rate climbing, then the **Problem card** opening with its impact (the affected service and endpoint), the root cause (`ArithmeticException` in `DynatraceDemoApplication.errorTransaction`), and the linked logs.
+3. **Recovery:** run `dtdemo-load calm` and show the Problem closing on its own.
 
 ## Troubleshooting
 

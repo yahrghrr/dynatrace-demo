@@ -1,0 +1,17 @@
+[Unit]
+Description=Dynatrace Demo load generator (normal + error traffic)
+Wants=network-online.target dynatrace-demo.service
+After=network-online.target dynatrace-demo.service
+
+[Service]
+Type=simple
+User=dynatrace-demo
+Group=dynatrace-demo
+ExecStart=/opt/dynatrace-demo/bin/loadgen.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
