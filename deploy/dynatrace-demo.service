@@ -1,0 +1,26 @@
+[Unit]
+Description=Dynatrace Demo Spring Boot App
+Documentation=file:///opt/dynatrace-demo/README.md
+# Wait for the network to be fully up (so port 8080 binds and OneAgent can report)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=dynatrace-demo
+Group=dynatrace-demo
+WorkingDirectory=/opt/dynatrace-demo
+# Optional overrides (e.g. JAVA_OPTS, SERVER_PORT) go in this file; "-" = optional
+EnvironmentFile=-/etc/default/dynatrace-demo
+ExecStart=/bin/sh -c 'exec /usr/bin/java $JAVA_OPTS -jar /opt/dynatrace-demo/dynatrace-demo.jar'
+# Java exits with 143 on SIGTERM — treat that as a clean stop
+SuccessExitStatus=143
+# Restart if it ever dies, not just on failure
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+# Start automatically at boot
+WantedBy=multi-user.target
