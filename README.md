@@ -148,7 +148,7 @@ bash scripts/trigger.sh normal 20      # 20x /normal
 bash scripts/trigger.sh error 5        # 5x /error
 bash scripts/trigger.sh mix 100        # 100 requests, ~20% errors
 bash scripts/trigger.sh loop           # one request every 2s until Ctrl+C, ~20% errors
-bash scripts/trigger.sh baseline 60    # 60 min of healthy traffic (builds a Davis baseline)
+bash scripts/trigger.sh baseline 60    # 60 min of healthy traffic (no errors)
 bash scripts/trigger.sh storm 10       # 10 min failure storm (~120 req/min, ~50% errors)
 ```
 
@@ -196,12 +196,13 @@ Notes:
   ```
 
 - If the app is down, requests are counted as `unreachable` and the generator keeps trying.
-- Keep the baseline at **10 req/min or more**. Below about that, Davis's over-alerting protection may skip evaluating the service.
+- Don't turn the baseline load too low. Davis's over-alerting protection skips services below a configurable number of requests per minute (see [DYNATRACE.md](DYNATRACE.md), Option B). The default of 60 req/min is plenty.
+- Davis only starts baseline-based failure-rate alerting after a service has run for about **34 hours** (20% of a week). Deploy early, or use the fixed threshold in DYNATRACE.md, Option B.
 
 ### What you should see in Dynatrace
 - **Services →** `dynatrace-demo` (or `DynatraceDemoApplication`): requests to `/normal` and `/error`, and the failure rate going up as `/error` is hit.
 - **Distributed traces / PurePaths** for `/error`: an `ArithmeticException: / by zero` thrown in `DynatraceDemoApplication.errorTransaction`.
-- **Logs:** `ERROR … [ERROR] Divide by zero exception caught!` from `/var/log/dynatrace-demo/application.log`. If the log isn't ingested automatically, add that path under **Settings → Log Monitoring → Log ingest rules / Custom log sources**.
+- **Logs:** `ERROR … [ERROR] Divide by zero exception caught!` from `/var/log/dynatrace-demo/application.log`. If the log isn't ingested automatically, add that path as a custom log source or ingest rule under Log Monitoring in Settings.
 - **Problems:** a few `/error` calls do **not** open a Problem by themselves. Davis alerts on a sustained, significant rise in the failure rate with enough traffic, not on single errors. To get a **Problem card**, see **[DYNATRACE.md](DYNATRACE.md)**. It covers relying on the automatic baseline, setting a fixed failure-rate threshold (recommended for demos), and creating a metric or log event that fires on every error.
 
 ---

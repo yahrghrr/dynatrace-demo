@@ -10,7 +10,6 @@
 #   bash scripts/trigger.sh loop            # every 2s forever (Ctrl+C to stop), ~20% errors
 #   bash scripts/trigger.sh baseline 30     # 30 min of healthy traffic (~60 req/min, 0% errors)
 #   bash scripts/trigger.sh storm 10        # 10 min failure storm (~120 req/min, ~50% errors)
-#                                           #   -> enough volume/duration for Davis to open a problem
 #
 #   BASE_URL=http://10.0.0.5:8080 bash scripts/trigger.sh mix 100   # remote VM
 #   DELAY=0.5 bash scripts/trigger.sh loop                          # faster loop
