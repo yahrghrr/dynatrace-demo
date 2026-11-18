@@ -72,8 +72,11 @@ If nothing appears after about 10 minutes of storm, the baseline probably isn't 
 
 This tells Davis to use a fixed threshold for this service instead of waiting for a learned baseline.
 
-1. Go to **Services**, open the **dynatrace-demo** service, then **⋯ (More) → Settings → Anomaly detection**.
-   The global equivalent is **Settings → Anomaly detection → Services**. It applies to *all* services, so prefer the per-service setting.
+1. Open the failure-rate settings for the **dynatrace-demo** service:
+   - **Newer platform** (Settings app; the left panel shows *Process and contextualize* and *Analyze and alert*): from the service, open **Settings → Analyze and alert → Alerts**, then the **failure rate** section.
+   - If there's no failure rate section there, use **Search settings** for `failure rate`, `anomaly detection` or `services`. Or click **Go to environment** and look for the services anomaly-detection setting at environment level. That one applies to *all* services.
+   - **Classic UI:** **Services → dynatrace-demo → ⋯ (More) → Settings → Anomaly detection**. The global equivalent is **Settings → Anomaly detection → Services**.
+   - If you can't find a failure-rate setting at all, skip to **Option C1**. A custom alert does the same job and works on every UI.
 2. Under **Failure rate**:
    - Turn on detection and switch the mode from **Automatic** to **Using fixed thresholds**.
    - **Threshold:** `5` %. Alert when more than 5% of requests fail.
@@ -98,8 +101,29 @@ Use this when even a single `/error` call should open a Problem. You can use eit
 
 ### C1. Metric event on server-side errors
 
+**On the newer platform: Anomaly Detection app (custom alert)**
+
+1. Open **Apps → Anomaly Detection → + Custom alert** (some versions call it an *anomaly detector*).
+2. Test this query in a **Notebook** first. It should return a non-zero series right after you run `bash scripts/trigger.sh error 3`:
+
+   ```
+   timeseries failures = sum(dt.service.request.failure_count), by:{dt.entity.service}
+   | fieldsAdd service = entityName(dt.entity.service)
+   | filter service == "dynatrace-demo"
+   ```
+
+   If it returns nothing, make sure the name matches what **Services** shows. On some tenants the metric name is different: type `dt.service.request` in the query editor and pick the failure-count metric it suggests.
+3. In the custom alert, paste the query and configure:
+   - **Analyzer:** **Static threshold**
+   - **Threshold:** `0`, alert when **above**
+   - **Violating samples:** `1`, **Sliding window:** `3`, **Dealerting samples:** `3`
+   - **Event title:** `Divide-by-zero errors on dynatrace-demo`
+   - **Event type/category:** **Error**
+4. Save, then run `bash scripts/trigger.sh error 3`. A Problem appears within a few minutes.
+
+**On the classic UI: metric event**
+
 1. Go to **Settings → Anomaly detection → Metric events → Add metric event**.
-   On newer tenants you can also use the **Anomaly Detection** app with a DQL-based detector; the idea is the same.
 2. Configure:
    - **Summary:** `dynatrace-demo /error failures`
    - **Type:** Metric key `builtin:service.errors.server.count`
