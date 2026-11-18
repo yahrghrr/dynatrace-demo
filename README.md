@@ -1,5 +1,7 @@
 # Dynatrace Demo
 
+> Intended for demos and testing, not for production use.
+
 A small Spring Boot 3 (Java 17) web app for demonstrating **Dynatrace** monitoring. It exposes two endpoints:
 
 | Endpoint      | Behaviour                                                                 | HTTP |
