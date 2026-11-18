@@ -14,6 +14,7 @@ Dynatrace OneAgent picks up the failed `/error` requests as service failures, re
 ├── pom.xml
 ├── setup.sh                         # one-shot install on a VM (build + systemd service)
 ├── uninstall.sh                     # removes the service
+├── DYNATRACE.md                     # how to get Davis to open Problem cards from /error
 ├── deploy/
 │   ├── dynatrace-demo.service       # systemd unit (auto-start on boot)
 │   └── dynatrace-demo.env           # -> /etc/default/dynatrace-demo (JAVA_OPTS, SERVER_PORT)
@@ -131,6 +132,8 @@ bash scripts/trigger.sh normal 20      # 20x /normal
 bash scripts/trigger.sh error 5        # 5x /error
 bash scripts/trigger.sh mix 100        # 100 requests, ~20% errors
 bash scripts/trigger.sh loop           # one request every 2s until Ctrl+C, ~20% errors
+bash scripts/trigger.sh baseline 60    # 60 min of healthy traffic (builds a Davis baseline)
+bash scripts/trigger.sh storm 10       # 10 min failure storm (~120 req/min, ~50% errors)
 ```
 
 To target a remote VM or change the loop speed:
@@ -147,7 +150,7 @@ DELAY=0.5 bash scripts/trigger.sh loop
 - **Services →** `dynatrace-demo` (or `DynatraceDemoApplication`): requests to `/normal` and `/error`, and the failure rate going up as `/error` is hit.
 - **Distributed traces / PurePaths** for `/error`: an `ArithmeticException: / by zero` thrown in `DynatraceDemoApplication.errorTransaction`.
 - **Logs:** `ERROR … [ERROR] Divide by zero exception caught!` from `/var/log/dynatrace-demo/application.log`. If the log isn't ingested automatically, add that path under **Settings → Log Monitoring → Log ingest rules / Custom log sources**.
-- If you keep the error rate up with `trigger.sh loop` or `mix`, Davis can open a **Failure rate increase** problem.
+- **Problems:** a few `/error` calls do **not** open a Problem by themselves. Davis alerts on a sustained, significant rise in the failure rate with enough traffic, not on single errors. To get a **Problem card**, see **[DYNATRACE.md](DYNATRACE.md)**. It covers relying on the automatic baseline, setting a fixed failure-rate threshold (recommended for demos), and creating a metric or log event that fires on every error.
 
 ---
 
