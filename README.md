@@ -1,5 +1,7 @@
 # Dynatrace Demo
 
+Author: **Sam JD**
+
 > Intended for demos and testing, not for production use.
 
 A small Spring Boot 3 (Java 17) web app for demonstrating **Dynatrace** monitoring. It exposes two endpoints:
@@ -280,3 +282,7 @@ Then open http://localhost:8080/normal or http://localhost:8080/error.
 - **The app works on the VM but not from outside it:** check the OS firewall and the cloud firewall or security group (section 1d).
 - **The service doesn't appear in Dynatrace:** confirm OneAgent is running (`systemctl status oneagent`), then restart the app with `sudo systemctl restart dynatrace-demo`. OneAgent only instruments Java processes that start *after* it is installed.
 - **Why the app's internal error page is at `/internal-error`:** Spring Boot's built-in error page defaults to `/error`, which clashes with the demo's own `GET /error` endpoint. With the default, the handler ran twice per request and returned a Tomcat HTML page. `server.error.path=/internal-error` in `application.properties` moves Spring's page out of the way.
+
+## Author
+
+Created and maintained by **Sam JD**.
