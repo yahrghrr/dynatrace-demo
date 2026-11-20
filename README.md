@@ -26,6 +26,8 @@ dtdemo-load calm           # back to normal
 ├── setup.sh                         # one-shot install on a VM (build + systemd service)
 ├── uninstall.sh                     # removes the services
 ├── DYNATRACE.md                     # how to get Davis to open Problem cards from /error
+├── dashboards/
+│   └── server-health-averages.json  # Dashboards app: avg CPU / memory / disk across all servers
 ├── deploy/
 │   ├── dynatrace-demo.service       # systemd unit for the app (auto-start on boot)
 │   ├── dynatrace-demo.env           # -> /etc/default/dynatrace-demo (JAVA_OPTS, SERVER_PORT)
@@ -208,6 +210,10 @@ Notes:
 - **Problems:** a few `/error` calls do **not** open a Problem by themselves. Davis alerts on a sustained, significant rise in the failure rate with enough traffic, not on single errors. To get a **Problem card**, see **[DYNATRACE.md](DYNATRACE.md)**. It covers relying on the automatic baseline, setting a fixed failure-rate threshold (recommended for demos), and creating a metric or log event that fires on every error.
 
 ---
+
+### Server health dashboard
+
+Import [`dashboards/server-health-averages.json`](dashboards/server-health-averages.json) into the **Dashboards** app to see the average CPU, memory and disk usage across all servers, plus a per-host breakdown. See [`dashboards/README.md`](dashboards/README.md).
 
 ## 3. Auto-start on VM boot
 

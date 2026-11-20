@@ -1,0 +1,237 @@
+{
+  "version": 15,
+  "variables": [],
+  "tiles": {
+    "0": {
+      "type": "markdown",
+      "title": "",
+      "content": "## Server health: fleet averages\nAverage **CPU**, **memory** and **disk** usage across **all monitored hosts** for the selected timeframe. Disk is averaged over every disk on every host. Tiles turn amber at 70% and red at 85%."
+    },
+    "1": {
+      "title": "Hosts reporting",
+      "type": "data",
+      "query": "timeseries v = avg(dt.host.cpu.usage), by: {dt.entity.host}\n| summarize hosts = count()",
+      "visualization": "singleValue",
+      "visualizationSettings": {
+        "singleValue": {
+          "label": "hosts",
+          "recordField": "hosts",
+          "showLabel": true
+        }
+      }
+    },
+    "2": {
+      "title": "Avg CPU usage (%)",
+      "type": "data",
+      "query": "timeseries v = avg(dt.host.cpu.usage)\n| fieldsAdd value = round(arrayAvg(v), decimals: 1)\n| fields value",
+      "visualization": "singleValue",
+      "visualizationSettings": {
+        "singleValue": {
+          "label": "% CPU, all hosts",
+          "recordField": "value",
+          "showLabel": true,
+          "colorThresholdTarget": "background"
+        },
+        "thresholds": [
+          {
+            "id": 1,
+            "field": "value",
+            "title": "",
+            "isEnabled": true,
+            "rules": [
+              {
+                "id": 0,
+                "color": {
+                  "Default": "var(--dt-colors-charts-status-ideal-default, #2f6863)"
+                },
+                "comparator": "≥",
+                "label": "",
+                "value": 0
+              },
+              {
+                "id": 1,
+                "color": {
+                  "Default": "var(--dt-colors-charts-status-warning-default, #eea53c)"
+                },
+                "comparator": "≥",
+                "label": "",
+                "value": 70
+              },
+              {
+                "id": 2,
+                "color": {
+                  "Default": "var(--dt-colors-charts-status-critical-default, #c4233b)"
+                },
+                "comparator": "≥",
+                "label": "",
+                "value": 85
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "3": {
+      "title": "Avg memory usage (%)",
+      "type": "data",
+      "query": "timeseries v = avg(dt.host.memory.usage)\n| fieldsAdd value = round(arrayAvg(v), decimals: 1)\n| fields value",
+      "visualization": "singleValue",
+      "visualizationSettings": {
+        "singleValue": {
+          "label": "% memory, all hosts",
+          "recordField": "value",
+          "showLabel": true,
+          "colorThresholdTarget": "background"
+        },
+        "thresholds": [
+          {
+            "id": 1,
+            "field": "value",
+            "title": "",
+            "isEnabled": true,
+            "rules": [
+              {
+                "id": 0,
+                "color": {
+                  "Default": "var(--dt-colors-charts-status-ideal-default, #2f6863)"
+                },
+                "comparator": "≥",
+                "label": "",
+                "value": 0
+              },
+              {
+                "id": 1,
+                "color": {
+                  "Default": "var(--dt-colors-charts-status-warning-default, #eea53c)"
+                },
+                "comparator": "≥",
+                "label": "",
+                "value": 70
+              },
+              {
+                "id": 2,
+                "color": {
+                  "Default": "var(--dt-colors-charts-status-critical-default, #c4233b)"
+                },
+                "comparator": "≥",
+                "label": "",
+                "value": 85
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "4": {
+      "title": "Avg disk used (%)",
+      "type": "data",
+      "query": "timeseries v = avg(dt.host.disk.used.percent)\n| fieldsAdd value = round(arrayAvg(v), decimals: 1)\n| fields value",
+      "visualization": "singleValue",
+      "visualizationSettings": {
+        "singleValue": {
+          "label": "% disk used, all disks",
+          "recordField": "value",
+          "showLabel": true,
+          "colorThresholdTarget": "background"
+        },
+        "thresholds": [
+          {
+            "id": 1,
+            "field": "value",
+            "title": "",
+            "isEnabled": true,
+            "rules": [
+              {
+                "id": 0,
+                "color": {
+                  "Default": "var(--dt-colors-charts-status-ideal-default, #2f6863)"
+                },
+                "comparator": "≥",
+                "label": "",
+                "value": 0
+              },
+              {
+                "id": 1,
+                "color": {
+                  "Default": "var(--dt-colors-charts-status-warning-default, #eea53c)"
+                },
+                "comparator": "≥",
+                "label": "",
+                "value": 70
+              },
+              {
+                "id": 2,
+                "color": {
+                  "Default": "var(--dt-colors-charts-status-critical-default, #c4233b)"
+                },
+                "comparator": "≥",
+                "label": "",
+                "value": 85
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "5": {
+      "title": "Average utilization over time, all hosts (%)",
+      "type": "data",
+      "query": "timeseries {\n  `CPU` = avg(dt.host.cpu.usage),\n  `Memory` = avg(dt.host.memory.usage),\n  `Disk used` = avg(dt.host.disk.used.percent)\n}",
+      "visualization": "lineChart",
+      "visualizationSettings": {}
+    },
+    "6": {
+      "title": "Per-host averages (%)",
+      "type": "data",
+      "query": "timeseries {\n  cpu = avg(dt.host.cpu.usage),\n  mem = avg(dt.host.memory.usage),\n  disk = avg(dt.host.disk.used.percent)\n}, by: {dt.entity.host}\n| fieldsAdd Host = entityName(dt.entity.host),\n    `CPU %` = round(arrayAvg(cpu), decimals: 1),\n    `Memory %` = round(arrayAvg(mem), decimals: 1),\n    `Disk used %` = round(arrayAvg(disk), decimals: 1)\n| fields Host, `CPU %`, `Memory %`, `Disk used %`\n| sort `CPU %` desc",
+      "visualization": "table",
+      "visualizationSettings": {}
+    }
+  },
+  "layouts": {
+    "0": {
+      "x": 0,
+      "y": 0,
+      "w": 24,
+      "h": 2
+    },
+    "1": {
+      "x": 0,
+      "y": 2,
+      "w": 6,
+      "h": 4
+    },
+    "2": {
+      "x": 6,
+      "y": 2,
+      "w": 6,
+      "h": 4
+    },
+    "3": {
+      "x": 12,
+      "y": 2,
+      "w": 6,
+      "h": 4
+    },
+    "4": {
+      "x": 18,
+      "y": 2,
+      "w": 6,
+      "h": 4
+    },
+    "5": {
+      "x": 0,
+      "y": 6,
+      "w": 24,
+      "h": 7
+    },
+    "6": {
+      "x": 0,
+      "y": 13,
+      "w": 24,
+      "h": 8
+    }
+  },
+  "importedWithCode": false,
+  "settings": {}
+}
